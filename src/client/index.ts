@@ -2,9 +2,16 @@
  * @dsh-external/dsh-boot-animation - browser half.
  *
  * Plays the boot video full-frame in two cases:
- *   1. the conversation the user PINNED as their intro session, EVERY time it is
- *      opened (that is the "professional work mode" conversation they return to);
- *   2. a brand new, still-empty conversation, once per conversation.
+ *   1. ONCE per page load — the startup animation. Loading the page IS starting
+ *      DSH: the desktop shell ships no reload item on Windows and registers no
+ *      accelerator for one, so a page load is not something that happens
+ *      mid-session by accident;
+ *   2. the conversation the user PINNED as their intro session, EVERY time it is
+ *      opened (that is the "professional work mode" conversation they return to).
+ *
+ * A brand new conversation deliberately plays NOTHING. An ambient trigger that
+ * fires on every new chat stops reading as an intro and starts reading as an
+ * interruption.
  *
  * The pin exists because a specific conversation cannot be identified by name
  * from the client: session titles are not part of the session summary the client
@@ -47,10 +54,8 @@ export const inject = ['slots', 'uiSession']
 const VIDEO_URL = '/dsh-boot-animation/boot.mp4'
 const LIST_URL = '/dsh-boot-animation/videos.json'
 const SELECT_URL = '/dsh-boot-animation/select'
-const SEEN_KEY = 'dsh-boot-animation:seen'
 const PIN_KEY = 'dsh-boot-animation:pinned'
 const FIT_KEY = 'dsh-boot-animation:fit'
-const MAX_SEEN = 80
 /** Never let a stalled video trap the user behind the overlay. */
 const STALL_TIMEOUT_MS = 25000
 
@@ -178,29 +183,13 @@ function notify(...args: unknown[]): void {
   narrate(formatArgs(args))
 }
 
-function readSeen(): string[] {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(SEEN_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-function hasPlayed(sessionId: string): boolean {
-  return readSeen().includes(sessionId)
-}
-
-function markPlayed(sessionId: string): void {
-  try {
-    const seen = readSeen()
-    if (!seen.includes(sessionId)) seen.push(sessionId)
-    while (seen.length > MAX_SEEN) seen.shift()
-    window.localStorage.setItem(SEEN_KEY, JSON.stringify(seen))
-  } catch {
-    /* private mode: it simply replays next time */
-  }
-}
+/**
+ * Whether this page load has already played the startup splash.
+ *
+ * Module scope rather than component state: the overlay unmounts whenever the
+ * library panel opens, and remounting it must not replay the animation.
+ */
+let bootPlayed = false
 
 function readPinned(): string | null {
   try {
@@ -350,7 +339,7 @@ function BootOverlay({
 }): ReactElement | null {
   ensureStyle()
 
-  const { sessionId, isNewConversation } = useCurrentSession(store)
+  const { sessionId } = useCurrentSession(store)
   // Decided per open, so a change in the library panel lands on the next play.
   const fit = readFit()
 
@@ -402,32 +391,32 @@ function BootOverlay({
     return () => window.removeEventListener('keydown', onKey)
   }, [showing, close])
 
-  // Fire on every ENTRY into a conversation, not on every re-render.
+  // The startup trigger: once per page load, never per conversation. "Page load"
+  // and "the user started DSH" are the same event on this shell, which is what
+  // makes a startup animation possible at all — see the module doc at the top.
+  useEffect(() => {
+    if (bootPlayed) return
+    bootPlayed = true
+    log('client started: playing the startup splash')
+    open()
+  }, [open])
+
+  // The pin is an explicit opt-in and survives the change: a conversation the
+  // user deliberately pinned still plays every time it is opened.
   useEffect(() => {
     if (sessionId === null) return
     const entered = lastSessionRef.current !== sessionId
     lastSessionRef.current = sessionId
     if (!entered) return
-
-    const pinned = readPinned()
-    if (pinned !== null && pinned === sessionId) {
-      // The designated conversation: every time it is opened.
+    if (readPinned() === sessionId) {
       log('pinned session opened', sessionId)
       open()
-      return
     }
-    if (isNewConversation && !hasPlayed(sessionId)) {
-      markPlayed(sessionId)
-      log('new conversation', sessionId)
-      open()
-    }
-  }, [sessionId, isNewConversation, open])
+  }, [sessionId, open])
 
-  // An explicit preview from the library. This exists because the normal trigger
-  // is deliberately narrow — a NEW conversation plays once, and only a PINNED one
-  // replays — so "I switched the clip and refreshed and the other one never
-  // showed" was the expected behaviour of a design with no way to check your
-  // choice. A preview button removes that guesswork.
+  // An explicit preview from the library. The ambient trigger fires once per app
+  // start, so without this button there would be no way to check a clip you just
+  // picked without restarting DSH. A preview button removes that guesswork.
   useEffect(() => {
     if (previewAt === 0) return
     log('preview requested', previewAt)
@@ -724,7 +713,7 @@ function VideoLibrary({ onClose, onPreview }: { onClose: () => void; onPreview: 
       h(
         'p',
         null,
-        '选中的那段会在下次播放片头时登场 —— 新对话、以及你钉住的会话。',
+        '选中的那段会在下次播放片头时登场 —— 下次启动 DSH，或进入你钉住的会话。',
       ),
       ...(videos.length === 0
         ? [h('div', { className: 'dba-item' }, h('span', { className: 'dba-nm' }, '（还没找到任何视频）'))]
@@ -819,7 +808,7 @@ function VideoLibrary({ onClose, onPreview }: { onClose: () => void; onPreview: 
           {
             type: 'button',
             className: 'dba-btn dba-btn-preview',
-            title: '立刻播放当前选中的这段，不用等下一次开新对话或钉住的会话',
+            title: '立刻播放当前选中的这段，不用等下次启动 DSH 或进入钉住的会话',
             onClick: onPreview,
           },
           '▶ 预览当前',

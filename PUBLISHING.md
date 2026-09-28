@@ -108,8 +108,8 @@ url: https://github.com/NativeDog1/dsh-boot-animation
 name: NativeDog1/dsh-boot-animation
 category: ui
 description:
-  en: 'Plays an intro full-frame on a new conversation, or every time you open the one you pinned. Four clips ship inside the plugin itself — embedded in code, with no separate video files — and an in-app library switches between them, previews the choice, and accepts your own clip. The pin button sits beside Settings.'
-  zh: '打开新对话、或每次打开你钉住的那个会话时，铺满窗口播放一段片头动画。插件自带四段片头，直接内嵌在代码里（不带独立的视频文件）；界面里的片库可切换、可预览，也能随时换成你自己的片子；设置旁一键钉住会话。'
+  en: 'Plays an intro full-frame when DSH starts, and every time you open the conversation you pinned. Four clips ship inside the plugin itself — embedded in code, with no separate video files — and an in-app library switches between them, previews the choice, and accepts your own clip. The pin button sits beside Settings.'
+  zh: '启动 DSH、或每次打开你钉住的那个会话时，铺满窗口播放一段片头动画。插件自带四段片头，直接内嵌在代码里（不带独立的视频文件）；界面里的片库可切换、可预览，也能随时换成你自己的片子；设置旁一键钉住会话。'
 ```
 
 5. **Commit changes** → 回到 fork 首页，点 **Contribute** → **Open pull request**
@@ -228,7 +228,7 @@ dsh --profile smoketest --from-default-profile web
 dsh plugin --profile smoketest add github:NativeDog1/dsh-boot-animation
 ```
 
-启动后**硬刷新（Ctrl+Shift+R）**，确认侧边栏页脚出现 🎞 片头动画按钮。
+启动后**完全退出并重开应用**（Windows 版窗口内没有刷新快捷键），确认侧边栏页脚出现 🎞 片头动画按钮。
 
 这一步验证的正是本地测不到的东西：**bundle patch 是否真的把插件挂进了层栈**。
 本地一直是用注入器直接塞 loader entry 的，走的是另一条路。
@@ -245,4 +245,4 @@ git push --follow-tags
 ```
 
 因为 bundle 的 URL `rev` 是进程 nonce、不随内容变化，
-**用户升级后必须重启 DSH 服务 + 硬刷新**才能看到新版 —— README 里已写明这条。
+**用户升级后必须完全重启 DSH** 才能看到新版 —— README 里已写明这条。

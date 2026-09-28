@@ -1,9 +1,14 @@
 /**
- * verify-pin.mjs - prove the pinned conversation replays the intro EVERY open.
+ * verify-pin.mjs - exercise the pin rule: a pinned conversation replays the
+ * intro every time it is entered.
  *
- * Disambiguation trick: the new-conversation rule is suppressed by marking the
- * session as already seen, so if the overlay still comes up after a fresh page
- * load into that conversation, only the PIN rule can be responsible.
+ * The old disambiguation trick went away with the seen list. It used to mark the
+ * session as already seen so that only the PIN rule could explain an overlay
+ * after a reload. The STARTUP rule now plays on EVERY page load, so a reload no
+ * longer isolates anything. This script therefore checks what it can
+ * automatically (the startup rule fired, a brand new conversation stays silent,
+ * the pin was saved) and prints the pin state for the one step that needs a real
+ * in-session conversation switch, which it does not perform.
  *
  * Usage: node scripts/verify-pin.mjs <debugPort> <guiUrl>
  */
@@ -93,7 +98,6 @@ async function waitTrue(client, expression, timeoutMs) {
 }
 
 const PIN = `window.localStorage.getItem('dsh-boot-animation:pinned')`
-const SEEN = `window.localStorage.getItem('dsh-boot-animation:seen')`
 
 const page = await waitForPage()
 const client = await connect(page.webSocketDebuggerUrl)
@@ -119,9 +123,11 @@ const opened = await evaluate(
    })()`,
 )
 console.log('1 open a session   :', opened)
-await waitTrue(client, `document.querySelector('.dba-root') !== null`, 20000)
-const firstOverlay = await evaluate(client, `document.querySelectorAll('.dba-root').length`)
-console.log('  new-conv overlay :', firstOverlay === 1 ? 'played (expected for a blank conversation)' : 'did not play')
+// A brand new conversation plays NOTHING since the splash became a startup
+// animation. This is the check that flipped.
+await sleep(2500)
+const newConvOverlay = await evaluate(client, `document.querySelectorAll('.dba-root').length`)
+console.log('  new-conv overlay :', newConvOverlay === 0 ? 'silent (expected)' : 'PLAYED - the per-conversation trigger is back')
 await evaluate(client, `(() => { const b = document.querySelector('.dba-skip'); if (b) b.click() })()`)
 await sleep(800)
 
@@ -133,31 +139,21 @@ await sleep(600)
 const after = await evaluate(client, `JSON.stringify({ pinned: ${PIN}, cls: document.querySelector('.dba-pin').className })`)
 console.log('  pin after        :', after)
 
-// 3. Block the new-conversation rule for that session.
-const armed = await evaluate(
-  client,
-  `(() => {
-     const pinned = ${PIN};
-     if (!pinned) return 'no pin';
-     window.localStorage.setItem('dsh-boot-animation:seen', JSON.stringify([pinned]));
-     return JSON.stringify({ pinned, seen: JSON.parse(window.localStorage.getItem('dsh-boot-animation:seen')) });
-   })()`,
-)
-console.log('3 suppress new-conv:', armed)
-
-// 4. Fresh load straight into the pinned conversation.
-await evaluate(client, `window.localStorage.removeItem('dsh-boot-animation:seen')`)
-await evaluate(client, `window.localStorage.setItem('dsh-boot-animation:seen', JSON.stringify([${PIN}]))`)
+// 3. Reload. NOTE: the STARTUP rule also fires on every load, so an overlay here
+//    is evidence that the startup rule works, NOT that the pin rule fired.
+const pinSaved = await evaluate(client, PIN)
+console.log('3 pin saved        :', JSON.stringify(pinSaved))
 await load()
 
 const state = await evaluate(
   client,
-  `JSON.stringify({ pinned: ${PIN}, seen: ${SEEN}, pinDisabled: document.querySelector('.dba-pin') ? document.querySelector('.dba-pin').disabled : null })`,
+  `JSON.stringify({ pinned: ${PIN}, pinDisabled: document.querySelector('.dba-pin') ? document.querySelector('.dba-pin').disabled : null })`,
 )
 console.log('4 after reload     :', state)
 
 const replayed = await evaluate(client, `document.querySelectorAll('.dba-root').length`)
-console.log('  overlay present  :', replayed === 1 ? 'YES -> the PIN rule fired' : 'no')
+console.log('  overlay present  :', replayed === 1 ? 'YES -> startup rule fired (pin rule NOT isolated here)' : 'no')
+console.log('  pin rule itself  : needs an in-session conversation switch; check that the pin is green and re-enter the conversation')
 
 const video = await evaluate(
   client,

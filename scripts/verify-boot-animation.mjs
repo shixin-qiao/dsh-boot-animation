@@ -1,8 +1,8 @@
 /**
- * verify-boot-animation.mjs - prove the boot overlay fires on a NEW conversation.
+ * verify-boot-animation.mjs - prove the boot overlay fires when DSH starts.
  *
- * Opens the real GUI in headless Edge, clicks the shipped "new conversation"
- * control to create a blank session, then reads the overlay and the video
+ * Opens the real GUI in headless Edge — the navigation itself is the trigger,
+ * since the splash is a startup animation — then reads the overlay and the video
  * element back out of the DOM. If the video reports a real duration and a
  * moving currentTime, the asset was served, decoded and is genuinely playing.
  *
@@ -113,43 +113,8 @@ const booted = await waitTrue(client, `document.querySelector('.dvi-mic') !== nu
 console.log('booted          :', booted)
 await sleep(2500)
 
-// Is the landing session already blank (then the overlay should already be up)?
-const before = await evaluate(client, `JSON.stringify({ overlay: document.querySelectorAll('.dba-root').length, seen: window.localStorage.getItem('dsh-boot-animation:seen') })`)
-console.log('before click    :', before)
-
-const candidates = await evaluate(
-  client,
-  `(() => {
-     const all = Array.from(document.querySelectorAll('button, [role="button"], a'));
-     const interesting = all
-       .map((el) => ({
-         text: (el.textContent || '').trim().slice(0, 24),
-         title: el.getAttribute('title') || '',
-         aria: el.getAttribute('aria-label') || '',
-         cls: (el.className || '').toString().slice(0, 40),
-       }))
-       .filter((c) => /新对话|新会话|新建|new (chat|conversation|session)|compose|plus/i.test(c.text + ' ' + c.title + ' ' + c.aria + ' ' + c.cls));
-     return JSON.stringify({ total: all.length, interesting: interesting.slice(0, 12) });
-   })()`,
-)
-console.log('new-conv candidates:', candidates)
-
-const clicked = await evaluate(
-  client,
-  `(() => {
-     const all = Array.from(document.querySelectorAll('button, [role="button"], a'));
-     const pick = (el) => ((el.textContent||'') + ' ' + (el.getAttribute('title')||'') + ' ' + (el.getAttribute('aria-label')||''));
-     const hit = all.find((el) => /新建会话|新对话|new (chat|conversation|session)/i.test(pick(el)))
-              || all.find((el) => /新会话/i.test(pick(el)));
-     if (!hit) return JSON.stringify({ ok: false });
-     const label = ((hit.getAttribute('aria-label') || hit.getAttribute('title') || hit.textContent || '').trim()).slice(0, 30);
-     const cls = (hit.className || '').toString().slice(0, 40);
-     hit.click();
-     return JSON.stringify({ ok: true, label, cls });
-   })()`,
-)
-console.log('clicked         :', clicked)
-
+// The splash is a STARTUP animation: the Page.navigate above is itself the
+// trigger, so there is no "new conversation" click to make any more.
 const appeared = await waitTrue(client, `document.querySelector('.dba-root') !== null`, 25000)
 console.log('overlay appeared:', appeared)
 
