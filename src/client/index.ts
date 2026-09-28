@@ -71,6 +71,31 @@ const STALL_TIMEOUT_MS = 25000
  */
 let activeVersion: string | null = null
 let versionStarted = false
+
+/**
+ * Adopt the content key the host reports right now, and warm its media entry.
+ *
+ * Called again on every library refresh, not only once at page load. The
+ * overlay freezes its src at mount, and this shell gives the user no way to
+ * reload the page — its Windows application menu carries no reload item and
+ * registers no accelerator for one — so a key that only resolved at page load
+ * left "switch the clip, then restart the whole app" as the sole way to hear
+ * the new one. Adopting it here lands the switch on the very next open.
+ */
+function adoptActiveVersion(version: unknown): void {
+  if (typeof version !== 'string' || version === '') return
+  if (version === activeVersion) return
+  activeVersion = version
+  log('active version', version)
+  // Warm the media cache while nobody is waiting for it: with a versioned URL
+  // the host marks this immutable, so the later <video> request is answered
+  // from the local copy instead of the network.
+  void fetch(videoSrc(), { cache: 'force-cache' }).then(
+    () => notify('media prefetched', videoSrc()),
+    (error: unknown) => notify('prefetch failed', String(error)),
+  )
+}
+
 function resolveActiveVersion(): void {
   if (versionStarted) return
   versionStarted = true
@@ -79,15 +104,7 @@ function resolveActiveVersion(): void {
       const response = await fetch(LIST_URL, { cache: 'no-store' })
       if (!response.ok) return
       const data = (await response.json()) as { activeVersion?: unknown }
-      const version = data.activeVersion
-      if (typeof version !== 'string' || version === '') return
-      activeVersion = version
-      log('active version', version)
-      // Warm the media cache while nobody is waiting for it: with a versioned
-      // URL the host marks this immutable, so the later <video> request is
-      // answered from the local copy instead of the network.
-      await fetch(videoSrc(), { cache: 'force-cache' })
-      notify('media prefetched', videoSrc())
+      adoptActiveVersion(data.activeVersion)
     } catch (error: unknown) {
       notify('prefetch failed', String(error))
     }
@@ -218,7 +235,12 @@ const CSS = `
    NOTE: never put a backtick in this block — the whole sheet is a template
    literal, and one backtick ends it. scripts/check-css-template.mjs enforces it. */
 .dba-video.dba-cover{object-fit:cover;object-position:center}
-.dba-skip{position:absolute;top:20px;right:22px;z-index:2;
+/* Clears the native window-controls overlay: the desktop shell sets
+   titleBarOverlay height to 40, so the min/max/close cluster owns the top-right
+   corner as a NATIVE layer above the page — no z-index lifts a page element
+   over it, and at top:20 the button sat underneath it. env() reports 0 once the
+   chrome is gone, so the same rule rises back up in fullscreen. */
+.dba-skip{position:absolute;top:calc(env(titlebar-area-height,40px) + 16px);right:22px;z-index:2;
   border:1px solid rgba(255,255,255,.42);background:rgba(0,0,0,.42);
   color:#fff;border-radius:999px;padding:6px 16px;font-size:13px;line-height:1.4;
   font-family:inherit;cursor:pointer}
@@ -367,6 +389,19 @@ function BootOverlay({
     setShowing(true)
   }, [])
 
+  // Esc leaves the splash, like every other dismissable layer in the shell.
+  // While the element is in real fullscreen the browser consumes the first Esc
+  // to leave that and never delivers the keydown, so the pairing reads as one
+  // step back at a time: out of fullscreen, then out of the splash.
+  useEffect(() => {
+    if (!showing) return undefined
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showing, close])
+
   // Fire on every ENTRY into a conversation, not on every re-render.
   useEffect(() => {
     if (sessionId === null) return
@@ -509,7 +544,7 @@ function BootOverlay({
       },
       '跳过',
     ),
-    h('div', { className: 'dba-hint' }, needsTap ? '点击播放' : '点击开启声音 · 全屏'),
+    h('div', { className: 'dba-hint' }, needsTap ? '点击播放 · Esc 退出' : '点击开启声音 · 全屏 · Esc 退出'),
   )
 }
 
@@ -580,6 +615,8 @@ type VideoInfo = {
 type VideoList = {
   activeId: string | null
   activeHow?: string
+  /** Content key of the clip the host would serve right now. */
+  activeVersion?: string
   videos: VideoInfo[]
   userDir: string
 }
@@ -621,6 +658,10 @@ function VideoLibrary({ onClose, onPreview }: { onClose: () => void; onPreview: 
       const response = await fetch(LIST_URL, { cache: 'no-store' })
       const data = (await response.json()) as VideoList
       setState(data)
+      // Every refresh re-reads which clip is active, so a pick made in this
+      // panel is already in effect by the time the library closes and the
+      // overlay mounts again from scratch.
+      adoptActiveVersion(data.activeVersion)
       setMsg({ text: '', kind: '' })
     } catch (error: unknown) {
       setMsg({ text: '读取片库失败：' + String(error), kind: 'dba-err' })
